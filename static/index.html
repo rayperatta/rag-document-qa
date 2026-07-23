@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Document Q&A</title>
+<style>
+:root { --bg:#0a0a0f; --surface:#16161f; --border:#26262f; --text:#e8e8ee; --dim:#9a9aa8; --accent:#7c6cf8; --accent2:#4dd0c4; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif; min-height:100vh; }
+.header { padding:24px; border-bottom:1px solid var(--border); text-align:center; }
+.header h1 { font-size:24px; font-weight:700; }
+.header h1 span { color:var(--accent); }
+.header p { color:var(--dim); font-size:14px; margin-top:6px; }
+.container { max-width:840px; margin:0 auto; padding:24px; }
+.section-label { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:.1em; margin-bottom:12px; }
+.upload-box { border:2px dashed var(--border); border-radius:14px; padding:32px; text-align:center; cursor:pointer; transition:border-color .2s; margin-bottom:28px; }
+.upload-box:hover { border-color:var(--accent); }
+.upload-box p { color:var(--dim); font-size:14px; }
+.upload-box input { display:none; }
+.docs-list { margin-bottom:28px; }
+.doc-item { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 18px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
+.doc-item .name { font-size:14px; }
+.doc-item .meta { color:var(--dim); font-size:12px; }
+.doc-item button { background:none; border:1px solid var(--border); color:var(--dim); border-radius:6px; padding:4px 12px; cursor:pointer; font-size:12px; }
+.doc-item button:hover { color:#ff5f57; border-color:#ff5f57; }
+.chat-box { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:24px; }
+.chat-log { min-height:200px; margin-bottom:16px; }
+.msg { margin-bottom:14px; line-height:1.6; font-size:14px; }
+.msg.user { color:var(--accent2); }
+.msg.ai { color:var(--text); }
+.msg.ai .src { color:var(--dim); font-size:12px; margin-top:6px; padding:8px; background:var(--bg); border-radius:6px; }
+.input-row { display:flex; gap:10px; }
+.input-row input { flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:10px; padding:12px 16px; font-size:14px; }
+.input-row input:focus { outline:none; border-color:var(--accent); }
+.input-row button { background:var(--accent); color:#fff; border:none; border-radius:10px; padding:12px 28px; font-weight:600; cursor:pointer; font-size:14px; }
+.input-row button:hover { background:#6b5cf0; }
+.input-row button:disabled { opacity:.5; cursor:wait; }
+.badge { display:inline-block; font-size:11px; font-family:'JetBrains Mono',monospace; padding:3px 10px; border-radius:999px; margin-left:8px; }
+.badge.on { background:rgba(77,208,196,.15); color:var(--accent2); }
+.badge.off { background:rgba(255,95,87,.1); color:#ff5f57; }
+</style>
+</head>
+<body>
+<div class="header">
+<h1>RAG <span>Document Q&A</span></h1>
+<p>Upload PDFs and ask questions — powered by LangChain + ChromaDB</p>
+</div>
+<div class="container">
+<div class="section-label">1. Upload Documents</div>
+<div class="upload-box" id="dropZone">
+<p>📂 Click or drag a PDF file here</p>
+<input type="file" id="fileInput" accept=".pdf">
+</div>
+<div class="docs-list" id="docsList"></div>
+<div class="section-label">2. Ask Questions</div>
+<div class="chat-box">
+<div class="chat-log" id="chatLog">
+<div class="msg ai">Upload a PDF above, then ask a question about its content.</div>
+</div>
+<div class="input-row">
+<input type="text" id="questionInput" placeholder="Ask a question..." disabled>
+<button id="askBtn" disabled>Send</button>
+</div>
+</div>
+</div>
+<script>
+const fileInput=document.getElementById('fileInput');
+const dropZone=document.getElementById('dropZone');
+const docsList=document.getElementById('docsList');
+const chatLog=document.getElementById('chatLog');
+const questionInput=document.getElementById('questionInput');
+const askBtn=document.getElementById('askBtn');
+const statusBadge=document.createElement('span');
+
+dropZone.addEventListener('click',()=>fileInput.click());
+dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.style.borderColor='var(--accent)';});
+dropZone.addEventListener('dragleave',()=>{dropZone.style.borderColor='var(--border)';});
+dropZone.addEventListener('drop',e=>{e.preventDefault();dropZone.style.borderColor='var(--border)';if(e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]);});
+fileInput.addEventListener('change',()=>{if(fileInput.files[0]) uploadFile(fileInput.files[0]);});
+
+async function uploadFile(file){
+  const fd=new FormData(); fd.append('file',file);
+  dropZone.querySelector('p').textContent='⏳ Processing...';
+  try{
+    const r=await fetch('/api/upload',{method:'POST',body:fd});
+    const d=await r.json();
+    if(r.ok){addDoc(d); enableChat();}
+    else{alert(d.detail||'Upload failed');}
+  }catch(e){alert('Upload error: '+e);}
+  dropZone.querySelector('p').textContent='📂 Click or drag a PDF file here';
+}
+
+function addDoc(d){
+  const div=document.createElement('div'); div.className='doc-item';
+  div.innerHTML=`<span class="name">📄 ${d.filename}</span><span class="meta">${d.chunks} chunks</span>`;
+  const btn=document.createElement('button'); btn.textContent='Delete'; btn.onclick=()=>deleteDoc(d.doc_id,div);
+  div.appendChild(btn);
+  docsList.appendChild(div);
+}
+
+async function deleteDoc(id,el){
+  await fetch(`/api/documents/${id}`,{method:'DELETE'});
+  el.remove();
+}
+
+function enableChat(){
+  questionInput.disabled=false; askBtn.disabled=false;
+  questionInput.focus();
+}
+
+askBtn.addEventListener('click',ask);
+questionInput.addEventListener('keydown',e=>{if(e.key==='Enter')ask();});
+
+async function ask(){
+  const q=questionInput.value.trim(); if(!q) return;
+  questionInput.value=''; askBtn.disabled=true;
+  chatLog.innerHTML+=`<div class="msg user">❓ ${q}</div>`;
+  chatLog.innerHTML+=`<div class="msg ai" id="loading">⏳ Searching documents...</div>`;
+  try{
+    const fd=new FormData(); fd.append('question',q);
+    const r=await fetch('/api/ask',{method:'POST',body:fd});
+    const d=await r.json();
+    document.getElementById('loading').remove();
+    let html=d.answer.replace(/\n/g,'<br>');
+    if(d.sources&&d.sources.length){
+      html+=`<div class="src">Sources: ${d.sources.map(s=>`📄 ${s.filename} (${s.score})`).join(' · ')}</div>`;
+    }
+    chatLog.innerHTML+=`<div class="msg ai">${html}</div>`;
+  }catch(e){
+    document.getElementById('loading').remove();
+    chatLog.innerHTML+=`<div class="msg ai">Error: ${e}</div>`;
+  }
+  askBtn.disabled=false; questionInput.focus();
+}
+
+// Load existing docs on page load
+fetch('/api/documents').then(r=>r.json()).then(docs=>{
+  Object.entries(docs).forEach(([id,d])=>addDoc({doc_id:id,...d}));
+  if(Object.keys(docs).length>0) enableChat();
+});
+</script>
+</body>
+</html>
