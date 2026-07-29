@@ -1,5 +1,7 @@
 """LLM answer generation module — OpenRouter API integration."""
 import logging
+from typing import List
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -18,16 +20,33 @@ Answer based only on the above context. Be concise and cite sources."""
 
 
 class LLMGenerator:
+    """Generate answers using an OpenRouter-compatible LLM API."""
+
     def __init__(self, api_key: str, model: str = "meta-llama/llama-3.1-8b-instruct:free"):
+        """Initialize the generator.
+
+        Args:
+            api_key: OpenRouter API key. Empty string disables generation.
+            model: Model identifier on OpenRouter.
+        """
         self.api_key = api_key
         self.model = model
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
 
     def is_enabled(self) -> bool:
+        """Return True when an API key is configured."""
         return bool(self.api_key)
 
-    def generate(self, question: str, context_chunks: list[str]) -> str:
-        """Generate an answer using the LLM with retrieved context."""
+    def generate(self, question: str, context_chunks: List[str]) -> str:
+        """Generate an answer using the LLM with retrieved context.
+
+        Args:
+            question: User question in natural language.
+            context_chunks: Retrieved text chunks to ground the answer.
+
+        Returns:
+            Generated answer string, or a fallback message on failure.
+        """
         if not self.is_enabled():
             return "LLM not configured. Set OPENROUTER_API_KEY in .env to enable answer generation."
 
@@ -61,9 +80,12 @@ class LLMGenerator:
             data = resp.json()
             return data["choices"][0]["message"]["content"]
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"LLM API error {e.response.status_code}: {e.response.text[:200]}")
-            return f"LLM request failed (HTTP {e.response.status_code}). Falling back to retrieved chunks."
-        except Exception as e:
-            logger.error(f"LLM error: {e}")
-            return f"LLM error: {e}"
+        except httpx.HTTPStatusError as exc:
+            logger.error("LLM API error %s: %s", exc.response.status_code, exc.response.text[:200])
+            return f"LLM request failed (HTTP {exc.response.status_code}). Falling back to retrieved chunks."
+        except httpx.RequestError as exc:
+            logger.error("LLM network error: %s", exc)
+            return "LLM request failed due to a network error. Falling back to retrieved chunks."
+        except Exception as exc:
+            logger.error("LLM unexpected error: %s", exc)
+            return f"LLM error: {exc}"
