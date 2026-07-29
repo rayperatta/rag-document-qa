@@ -15,7 +15,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from rag.chunker import PDFChunker
+from rag.hybrid import HybridRetriever
 from rag.llm import LLMGenerator
+from rag.observability import Tracer, elapsed_ms, timed
 from rag.retriever import Retriever
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
@@ -44,10 +46,18 @@ retriever = Retriever(
     persist_dir=str(BASE_DIR / "data" / "chroma"),
     collection_name="documents",
 )
+# Hybrid retrieval: BM25 + vector fusion + cross-encoder reranking.
+# Toggle with HYBRID_SEARCH / RERANKER_ENABLED env vars.
+hybrid = HybridRetriever(
+    retriever,
+    reranker_enabled=os.getenv("RERANKER_ENABLED", "true").lower() == "true",
+)
+USE_HYBRID = os.getenv("HYBRID_SEARCH", "true").lower() == "true"
 llm = LLMGenerator(
     api_key=os.getenv("OPENROUTER_API_KEY", ""),
     model=os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free"),
 )
+tracer = Tracer()
 
 # --- Document registry (simple JSON-based) ---
 REGISTRY_PATH = BASE_DIR / "data" / "registry.json"
@@ -80,6 +90,8 @@ async def health():
         "documents": len(load_registry()),
         "embeddings_loaded": retriever.is_ready(),
         "llm_enabled": llm.is_enabled(),
+        "hybrid_search": USE_HYBRID,
+        "tracing": tracer.enabled,
     }
 
 
@@ -111,6 +123,7 @@ async def upload_document(file: UploadFile = File(...)):
     metadata = {"doc_id": doc_id, "filename": file.filename}
     retriever.add_documents(chunks, metadata)
     logger.info("Embedded and stored %d chunks for doc %s", len(chunks), doc_id)
+    hybrid.sync_index()  # keep BM25 consistent with the vector store
 
     # Update registry
     reg = load_registry()
@@ -130,26 +143,41 @@ async def ask_question(question: str = Form(...), top_k: int = Form(5)):
     if not retriever.is_ready():
         raise HTTPException(400, "No documents uploaded yet. Upload a PDF first.")
 
-    # Retrieve relevant chunks
-    results = retriever.search(question, k=top_k)
-    context_chunks = [r["content"] for r in results]
-    sources = [
-        {"filename": r["metadata"].get("filename", "?"), "score": round(r["score"], 4), "content": r["content"][:200]}
-        for r in results
-    ]
+    with tracer.trace_question(question, top_k) as trace:
+        # Retrieve relevant chunks (hybrid: BM25 + vectors + rerank, or vector-only)
+        t0 = timed()
+        mode = "hybrid" if USE_HYBRID else "vector"
+        results = hybrid.search(question, k=top_k) if USE_HYBRID else retriever.search(question, k=top_k)
+        retrieval_ms = elapsed_ms(t0)
+        trace.log_retrieval(results, retrieval_ms, mode)
 
-    # Generate answer (if LLM available)
-    if llm.is_enabled():
-        answer = llm.generate(question, context_chunks)
-        return {"question": question, "answer": answer, "sources": sources, "llm": True}
+        context_chunks = [r["content"] for r in results]
+        sources = [
+            {"filename": r["metadata"].get("filename", "?"), "score": round(float(r["score"]), 4), "content": r["content"][:200]}
+            for r in results
+        ]
 
-    # Fallback: return retrieved chunks directly
-    return {
-        "question": question,
-        "answer": "LLM not configured. Here are the most relevant chunks:\n\n" + "\n\n---\n\n".join(context_chunks),
-        "sources": sources,
-        "llm": False,
-    }
+        # Generate answer (if LLM available)
+        if llm.is_enabled():
+            t0 = timed()
+            answer = llm.generate(question, context_chunks)
+            gen_ms = elapsed_ms(t0)
+            trace.log_generation(
+                question, context_chunks, answer, llm.model,
+                usage=llm.last_usage, latency_ms=gen_ms,
+            )
+            trace.log_answer(answer, llm_used=True)
+            return {"question": question, "answer": answer, "sources": sources, "llm": True}
+
+        # Fallback: return retrieved chunks directly
+        answer = "LLM not configured. Here are the most relevant chunks:\n\n" + "\n\n---\n\n".join(context_chunks)
+        trace.log_answer(answer, llm_used=False)
+        return {
+            "question": question,
+            "answer": answer,
+            "sources": sources,
+            "llm": False,
+        }
 
 
 @app.get("/api/documents")
@@ -166,6 +194,7 @@ async def delete_document(doc_id: str):
         raise HTTPException(404, "Document not found")
 
     retriever.delete_by_metadata("doc_id", doc_id)
+    hybrid.sync_index()  # keep BM25 consistent with the vector store
 
     # Remove file
     for f in UPLOAD_DIR.glob(f"{doc_id}_*"):
@@ -174,6 +203,12 @@ async def delete_document(doc_id: str):
     del reg[doc_id]
     save_registry(reg)
     return {"deleted": doc_id}
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Flush observability events on graceful shutdown."""
+    tracer.shutdown()
 
 
 if __name__ == "__main__":

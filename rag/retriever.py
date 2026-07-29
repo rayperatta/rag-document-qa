@@ -81,6 +81,23 @@ class Retriever:
         Returns:
             List of dicts with ``content``, ``metadata``, and ``score`` keys.
         """
+        results = self.search_with_ids(query, k=k)
+        # Backwards-compatible shape (no IDs) for existing consumers.
+        return [
+            {"content": r["content"], "metadata": r["metadata"], "score": r["score"]}
+            for r in results
+        ]
+
+    def search_with_ids(self, query: str, k: int = 5) -> List[Dict]:
+        """Search for relevant chunks, including chunk IDs (for hybrid fusion).
+
+        Args:
+            query: Natural-language search query.
+            k: Maximum number of results to return.
+
+        Returns:
+            List of dicts with ``id``, ``content``, ``metadata``, and ``score`` keys.
+        """
         if not self.is_ready():
             return []
 
@@ -90,6 +107,7 @@ class Retriever:
             include=["documents", "metadatas", "distances"],
         )
 
+        ids = results["ids"][0] if results["ids"] else []
         docs = results["documents"][0] if results["documents"] else []
         metas = results["metadatas"][0] if results["metadatas"] else []
         dists = results["distances"][0] if results["distances"] else []
@@ -97,11 +115,12 @@ class Retriever:
         # Convert distance to similarity score (cosine distance → similarity)
         return [
             {
+                "id": chunk_id,
                 "content": doc,
                 "metadata": meta,
                 "score": 1 - dist,
             }
-            for doc, meta, dist in zip(docs, metas, dists)
+            for chunk_id, doc, meta, dist in zip(ids, docs, metas, dists)
         ]
 
     def delete_by_metadata(self, key: str, value: str) -> None:

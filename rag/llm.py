@@ -32,6 +32,8 @@ class LLMGenerator:
         self.api_key = api_key
         self.model = model
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
+        # Token usage from the most recent successful call (for observability).
+        self.last_usage: dict = {}
 
     def is_enabled(self) -> bool:
         """Return True when an API key is configured."""
@@ -78,6 +80,7 @@ class LLMGenerator:
             )
             resp.raise_for_status()
             data = resp.json()
+            self.last_usage = data.get("usage", {})
             return data["choices"][0]["message"]["content"]
 
         except httpx.HTTPStatusError as exc:
