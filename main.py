@@ -2,20 +2,21 @@
 RAG Document Q&A API
 Production-ready Retrieval-Augmented Generation system.
 """
+import json
+import logging
 import os
 import uuid
-import logging
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from rag.chunker import PDFChunker
-from rag.retriever import Retriever
 from rag.llm import LLMGenerator
+from rag.retriever import Retriever
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -49,29 +50,31 @@ llm = LLMGenerator(
 )
 
 # --- Document registry (simple JSON-based) ---
-import json
-
 REGISTRY_PATH = BASE_DIR / "data" / "registry.json"
 
 
-def load_registry() -> dict:
+def load_registry() -> Dict:
+    """Load the document registry from disk."""
     if REGISTRY_PATH.exists():
         return json.loads(REGISTRY_PATH.read_text())
     return {}
 
 
-def save_registry(reg: dict):
+def save_registry(reg: Dict) -> None:
+    """Persist the document registry to disk."""
     REGISTRY_PATH.write_text(json.dumps(reg, indent=2))
 
 
 # --- Routes ---
 @app.get("/", response_class=HTMLResponse)
 async def index():
+    """Serve the single-page web UI."""
     return (BASE_DIR / "static" / "index.html").read_text()
 
 
 @app.get("/api/health")
 async def health():
+    """Return service health and component status."""
     return {
         "status": "ok",
         "documents": len(load_registry()),
@@ -82,7 +85,8 @@ async def health():
 
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
-    if not file.filename.endswith(".pdf"):
+    """Upload a PDF, chunk it, embed it, and register it."""
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF files are supported")
 
     doc_id = str(uuid.uuid4())[:8]
@@ -90,15 +94,23 @@ async def upload_document(file: UploadFile = File(...)):
     content = await file.read()
     filepath.write_bytes(content)
 
-    logger.info(f"Processing {file.filename} ({len(content)} bytes)...")
+    logger.info("Processing %s (%d bytes)...", file.filename, len(content))
 
-    # Chunk and embed
-    chunks = chunker.chunk_pdf(str(filepath))
-    logger.info(f"Created {len(chunks)} chunks from {file.filename}")
+    try:
+        chunks = chunker.chunk_pdf(str(filepath))
+    except (FileNotFoundError, ValueError) as exc:
+        filepath.unlink(missing_ok=True)
+        raise HTTPException(400, str(exc)) from exc
+
+    if not chunks:
+        filepath.unlink(missing_ok=True)
+        raise HTTPException(400, "No extractable text found in the PDF")
+
+    logger.info("Created %d chunks from %s", len(chunks), file.filename)
 
     metadata = {"doc_id": doc_id, "filename": file.filename}
     retriever.add_documents(chunks, metadata)
-    logger.info(f"Embedded and stored {len(chunks)} chunks for doc {doc_id}")
+    logger.info("Embedded and stored %d chunks for doc %s", len(chunks), doc_id)
 
     # Update registry
     reg = load_registry()
@@ -114,6 +126,7 @@ async def upload_document(file: UploadFile = File(...)):
 
 @app.post("/api/ask")
 async def ask_question(question: str = Form(...), top_k: int = Form(5)):
+    """Answer a question using retrieved document chunks."""
     if not retriever.is_ready():
         raise HTTPException(400, "No documents uploaded yet. Upload a PDF first.")
 
@@ -129,23 +142,25 @@ async def ask_question(question: str = Form(...), top_k: int = Form(5)):
     if llm.is_enabled():
         answer = llm.generate(question, context_chunks)
         return {"question": question, "answer": answer, "sources": sources, "llm": True}
-    else:
-        # Fallback: return retrieved chunks directly
-        return {
-            "question": question,
-            "answer": "LLM not configured. Here are the most relevant chunks:\n\n" + "\n\n---\n\n".join(context_chunks),
-            "sources": sources,
-            "llm": False,
-        }
+
+    # Fallback: return retrieved chunks directly
+    return {
+        "question": question,
+        "answer": "LLM not configured. Here are the most relevant chunks:\n\n" + "\n\n---\n\n".join(context_chunks),
+        "sources": sources,
+        "llm": False,
+    }
 
 
 @app.get("/api/documents")
 async def list_documents():
+    """List all uploaded documents."""
     return load_registry()
 
 
 @app.delete("/api/documents/{doc_id}")
 async def delete_document(doc_id: str):
+    """Delete a document and its embeddings."""
     reg = load_registry()
     if doc_id not in reg:
         raise HTTPException(404, "Document not found")
