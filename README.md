@@ -60,6 +60,34 @@ The golden dataset (`eval/golden_dataset.json`) is versioned JSON — run before
 ### CI/CD
 GitHub Actions runs `ruff check` + `pytest` on every push and PR (`.github/workflows/ci.yml`).
 
+## Roadmap
+
+The system is being scaled in phases, each designed to be demoable and measurable on its own.
+
+### ✅ Phase 0 — Production retrieval core (done)
+- Hybrid search (BM25 + vector + RRF fusion) with cross-encoder reranking
+- Langfuse tracing on every request (retrieval + generation spans)
+- RAGAS evaluation harness with versioned golden dataset
+- CI: lint + tests on every push
+
+### 🚧 Phase 1 — Scale & reliability (in progress)
+- **Async ingestion**: Redis-backed task queue (arq) for PDF processing — job status endpoint, retries, backpressure. Upload returns `202 + job_id` instead of blocking.
+- **Feedback loop**: `POST /api/feedback` (👍/👎 per answer) stored in Langfuse → dataset for prompt/retrieval tuning.
+- **One-command stack**: `docker compose up` brings up app + Redis + Langfuse.
+- **Baseline metrics published**: RAGAS scores + p95 latency documented in this README.
+
+### Phase 2 — Multi-user & guardrails
+- **Collections / multi-tenancy**: namespaced document sets per user or project (ChromaDB collections) with per-collection queries.
+- **Groundedness guardrails**: out-of-domain question detection ("not enough context") and citation enforcement — answers must reference retrieved chunks.
+- **Auth**: API-key per tenant, rate limiting.
+
+### Phase 3 — Continuous improvement
+- **Prompt/retrieval A-B testing** driven by feedback + RAGAS regression in CI (eval must not drop vs. baseline).
+- **Query analytics dashboard**: top questions, failure clusters, thumbs-down rate over time (Langfuse + Grafana).
+- **Cost/latency optimization**: semantic caching, embedding quantization, model routing per query complexity.
+
+Each phase ships behind feature flags and keeps the eval suite green — no regression merges.
+
 ## Quick start
 
 ```bash
