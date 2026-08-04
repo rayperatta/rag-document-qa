@@ -1,0 +1,14 @@
+[
+  {
+    "question": "REPLACE: a question answerable from your uploaded documents",
+    "ground_truth": "REPLACE: the ideal answer, used for context_recall"
+  },
+  {
+    "question": "REPLACE: a second question targeting a different document section",
+    "ground_truth": "REPLACE: the ideal answer"
+  },
+  {
+    "question": "REPLACE: a question with exact terms (names, numbers, codes) — this is where hybrid search beats vector-only",
+    "ground_truth": "REPLACE: the ideal answer"
+  }
+]
