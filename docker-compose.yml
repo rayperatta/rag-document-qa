@@ -9,4 +9,25 @@ services:
       - ./data:/app/data
     env_file:
       - .env
+    environment:
+      # Inside compose, REDIS_URL defaults to the bundled redis service.
+      # The app falls back to sync ingestion when REDIS_URL is empty.
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  rag-worker:
+    build: .
+    command: python -m arq worker.WorkerSettings
+    volumes:
+      - ./data:/app/data
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
     restart: unless-stopped

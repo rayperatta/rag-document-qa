@@ -11,10 +11,11 @@ from typing import Dict, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse
 
+from rag import jobs
 from rag.chunker import PDFChunker
+from rag.feedback import FeedbackStore
 from rag.hybrid import HybridRetriever
 from rag.llm import LLMGenerator
 from rag.observability import Tracer, elapsed_ms, timed
@@ -58,6 +59,7 @@ llm = LLMGenerator(
     model=os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free"),
 )
 tracer = Tracer()
+feedback = FeedbackStore(str(BASE_DIR / "data" / "feedback.jsonl"), tracer=tracer)
 
 # --- Document registry (simple JSON-based) ---
 REGISTRY_PATH = BASE_DIR / "data" / "registry.json"
@@ -92,12 +94,19 @@ async def health():
         "llm_enabled": llm.is_enabled(),
         "hybrid_search": USE_HYBRID,
         "tracing": tracer.enabled,
+        "ingestion_mode": jobs.describe_mode(),
+        "feedback": feedback.summary(),
     }
 
 
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
-    """Upload a PDF, chunk it, embed it, and register it."""
+    """Upload a PDF for ingestion.
+
+    Async mode (REDIS_URL set): enqueues the job, returns ``202 + job_id``
+    immediately — poll ``GET /api/jobs/{job_id}`` for the result.
+    Sync mode (default): processes inline and returns the result directly.
+    """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF files are supported")
 
@@ -107,6 +116,23 @@ async def upload_document(file: UploadFile = File(...)):
     filepath.write_bytes(content)
 
     logger.info("Processing %s (%d bytes)...", file.filename, len(content))
+
+    if jobs.async_enabled():
+        try:
+            job_id = await jobs.enqueue_ingestion(
+                doc_id=doc_id,
+                filepath=str(filepath),
+                filename=file.filename,
+                size_bytes=len(content),
+            )
+        except Exception as exc:
+            filepath.unlink(missing_ok=True)
+            logger.error("Failed to enqueue ingestion: %s", exc)
+            raise HTTPException(503, "Ingestion queue unavailable") from exc
+        return JSONResponse(
+            status_code=202,
+            content={"job_id": job_id, "doc_id": doc_id, "status": "queued"},
+        )
 
     try:
         chunks = chunker.chunk_pdf(str(filepath))
@@ -135,6 +161,17 @@ async def upload_document(file: UploadFile = File(...)):
     save_registry(reg)
 
     return {"doc_id": doc_id, "filename": file.filename, "chunks": len(chunks)}
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: str):
+    """Poll the status of an async ingestion job."""
+    if not jobs.async_enabled():
+        raise HTTPException(400, "Async ingestion is not enabled (REDIS_URL unset)")
+    result = await jobs.job_status(job_id)
+    if result["status"] == "not_found":
+        raise HTTPException(404, "Job not found")
+    return result
 
 
 @app.post("/api/ask")
@@ -167,7 +204,13 @@ async def ask_question(question: str = Form(...), top_k: int = Form(5)):
                 usage=llm.last_usage, latency_ms=gen_ms,
             )
             trace.log_answer(answer, llm_used=True)
-            return {"question": question, "answer": answer, "sources": sources, "llm": True}
+            return {
+                "question": question,
+                "answer": answer,
+                "sources": sources,
+                "llm": True,
+                "trace_id": trace.trace_id,
+            }
 
         # Fallback: return retrieved chunks directly
         answer = "LLM not configured. Here are the most relevant chunks:\n\n" + "\n\n---\n\n".join(context_chunks)
@@ -177,7 +220,41 @@ async def ask_question(question: str = Form(...), top_k: int = Form(5)):
             "answer": answer,
             "sources": sources,
             "llm": False,
+            "trace_id": trace.trace_id,
         }
+
+
+@app.post("/api/feedback")
+async def submit_feedback(
+    question: str = Form(...),
+    answer: str = Form(...),
+    score: int = Form(...),
+    comment: str = Form(""),
+    trace_id: Optional[str] = Form(None),
+):
+    """Record user feedback (👍 = +1 / 👎 = -1) for an answer.
+
+    Stored locally (data/feedback.jsonl) and mirrored as a Langfuse score
+    when a ``trace_id`` from ``/api/ask`` is provided. The local store is
+    the tuning dataset: thumbs-down answers drive prompt/retrieval fixes.
+    """
+    try:
+        entry = feedback.record(
+            question=question,
+            answer=answer,
+            score=score,
+            comment=comment,
+            trace_id=trace_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"recorded": True, "feedback_id": entry["feedback_id"]}
+
+
+@app.get("/api/feedback/summary")
+async def feedback_summary():
+    """Aggregate feedback stats: totals and thumbs-down rate."""
+    return feedback.summary()
 
 
 @app.get("/api/documents")
