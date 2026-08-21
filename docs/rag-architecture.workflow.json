@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "RAG Document Q&A — How a Query Flows",
+    "subtitle": "Hybrid retrieval (BM25 + vector + RRF) · cross-encoder reranking · traced with Langfuse · measured with RAGAS",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "query-path",
+        "label": "Query to answer",
+        "focus": ["user", "chatui", "hybrid", "rerank", "prompt", "llm", "answer"],
+        "note": "Follow a natural-language question from the UI to a grounded, cited answer."
+      },
+      {
+        "id": "indexing-path",
+        "label": "Async indexing",
+        "focus": ["pdf", "worker", "chroma"],
+        "note": "PDFs are queued, chunked, embedded and persisted by a background worker with retries."
+      },
+      {
+        "id": "quality-loop",
+        "label": "Observability & eval",
+        "focus": ["chatui", "langfuse", "chroma", "ragas"],
+        "note": "Every request is traced; RAGAS scores faithfulness and context quality against a golden dataset."
+      }
+    ],
+    "output": "docs/rag-architecture.html",
+    "viewBox": [720, 900]
+  },
+  "lanes": [
+    { "id": "client", "label": "User / Client" },
+    { "id": "llmapi", "label": "External LLM" },
+    { "id": "pipeline", "label": "RAG Pipeline" },
+    { "id": "ingest", "label": "Indexing (async)" },
+    { "id": "observe", "label": "Observability & Eval" }
+  ],
+  "phases": [
+    { "id": "intake", "label": "1 · Intake", "fromCol": 0, "toCol": 0 },
+    { "id": "retrieval", "label": "2 · Retrieval", "fromCol": 1, "toCol": 4, "variant": "emphasis" },
+    { "id": "generate", "label": "3 · Generate", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "query_core", "label": "Hybrid retrieval core", "lane": "pipeline", "fromCol": 1, "toCol": 4, "variant": "emphasis" },
+    { "id": "indexing_group", "label": "arq + Redis", "lane": "ingest", "fromCol": 2, "toCol": 3, "variant": "dashed" }
+  ],
+  "mainPath": ["user", "chatui", "hybrid", "rerank", "prompt", "llm", "answer"],
+  "nodes": [
+    { "id": "user", "lane": "client", "col": 0, "type": "external", "label": "User", "sublabel": "asks a question" },
+    { "id": "chatui", "lane": "client", "col": 1, "type": "frontend", "label": "Web UI / API", "sublabel": "FastAPI · /api/ask" },
+    { "id": "answer", "lane": "client", "col": 5, "type": "backend", "label": "Answer", "sublabel": "grounded + cited", "tag": "trace_id" },
+    { "id": "llm", "lane": "llmapi", "col": 5, "type": "cloud", "label": "LLM", "sublabel": "OpenRouter / OpenAI" },
+    { "id": "hybrid", "lane": "pipeline", "col": 1, "type": "backend", "label": "Hybrid Search", "sublabel": "BM25 + vector · RRF", "tag": "HYBRID_SEARCH" },
+    { "id": "rerank", "lane": "pipeline", "col": 4, "type": "backend", "label": "Reranker", "sublabel": "cross-encoder" },
+    { "id": "prompt", "lane": "pipeline", "col": 5, "type": "backend", "label": "Augment", "sublabel": "prompt assembly" },
+    { "id": "pdf", "lane": "ingest", "col": 0, "type": "external", "label": "PDF Upload", "sublabel": "/api/upload" },
+    { "id": "worker", "lane": "ingest", "col": 2, "type": "messagebus", "label": "Worker", "sublabel": "chunk + embed" },
+    { "id": "chroma", "lane": "ingest", "col": 3, "type": "database", "label": "ChromaDB", "sublabel": "vectors + BM25" },
+    { "id": "langfuse", "lane": "observe", "col": 5, "type": "database", "label": "Langfuse", "sublabel": "traces · tokens" },
+    { "id": "ragas", "lane": "observe", "col": 3, "type": "security", "label": "RAGAS Eval", "sublabel": "faithfulness · recall", "tag": "golden dataset" }
+  ],
+  "edges": [
+    { "id": "user-query", "from": "user", "to": "chatui", "variant": "default" },
+    { "id": "query-retrieve", "from": "chatui", "to": "hybrid", "label": "query", "variant": "emphasis" },
+    { "id": "hybrid-rerank", "from": "hybrid", "to": "rerank", "variant": "emphasis", "route": "straight" },
+    { "id": "rerank-prompt", "from": "rerank", "to": "prompt", "variant": "emphasis" },
+    { "id": "prompt-llm", "from": "prompt", "to": "llm", "variant": "emphasis" },
+    { "id": "llm-answer", "from": "llm", "to": "answer", "variant": "emphasis", "role": "return" },
+    { "id": "upload-worker", "from": "pdf", "to": "worker", "variant": "default" },
+    { "id": "worker-store", "from": "worker", "to": "chroma", "variant": "default", "route": "straight" },
+    { "id": "store-search", "from": "chroma", "to": "hybrid", "variant": "default", "role": "branch" },
+    { "id": "prompt-trace", "from": "prompt", "to": "langfuse", "label": "trace + feedback", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "route": "drop" },
+    { "id": "store-eval", "from": "chroma", "to": "ragas", "label": "eval", "variant": "dashed", "role": "branch" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Why Hybrid Retrieval",
+      "items": [
+        "Pure vector search misses exact terms: names, codes, numbers",
+        "BM25 catches keywords; vectors catch semantics",
+        "Reciprocal Rank Fusion merges both rankings",
+        "Cross-encoder reranking gives final precision"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Production Touches",
+      "items": [
+        "Async ingestion: upload returns 202 + job_id instantly",
+        "Worker with retries (×3) and bounded concurrency",
+        "Every query traced: spans, token usage, latency",
+        "Feedback loop (±1) stored as a tuning dataset"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "How Quality Is Proven",
+      "items": [
+        "RAGAS: faithfulness, relevancy, precision, recall",
+        "Versioned golden dataset for before/after comparisons",
+        "CI runs lint + tests on every push",
+        "Thumbs-down rate watched after every change"
+      ]
+    }
+  ]
+}
