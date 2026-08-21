@@ -17,16 +17,16 @@ A production-ready Retrieval-Augmented Generation system for querying PDF docume
 
 ## Architecture
 
-![RAG pipeline architecture](docs/rag-architecture.png)
+![RAG Document Q&A — pipeline infographic](docs/rag-infographic.png)
 
-The query flow in three phases — **intake → retrieval → generation** — plus the async indexing lane and the observability/eval lane:
+The query flow in four phases — **intake → hybrid retrieval → augmentation → generation** — plus the async indexing side-lane and the quality loop:
 
 - **Retrieval**: hybrid search (BM25 + vector, fused with RRF) followed by cross-encoder reranking
 - **Generation**: reranked chunks are assembled into the prompt and answered by the configured LLM, with citations
 - **Indexing**: uploads return `202 + job_id`; a background worker (arq + Redis) chunks, embeds and persists to ChromaDB
 - **Observability**: every request is traced in Langfuse (spans, tokens, latency, user feedback); RAGAS evaluates against a versioned golden dataset
 
-An interactive version (dark/light themes, guided views, trace animation) lives in [`docs/rag-architecture.html`](docs/rag-architecture.html) — open it locally in a browser.
+An interactive, explorable version (dark/light themes, guided views, trace animation) lives in [`docs/rag-architecture.html`](docs/rag-architecture.html) — open it locally in a browser. The infographic source is [`docs/rag-infographic.html`](docs/rag-infographic.html).
 
 ## Stack
 
