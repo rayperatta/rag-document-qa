@@ -1,6 +1,8 @@
 # RAG Document Q&A API
 
-A production-ready Retrieval-Augmented Generation system for querying PDF documents using natural language.
+An independent Retrieval-Augmented Generation prototype for querying PDF documents using natural language. It combines retrieval, reranking, optional tracing and an evaluation harness.
+
+**Status:** local portfolio project. Authentication, tenant separation and published quality/latency baselines remain roadmap items. Use sample or non-sensitive documents in a trusted local environment; the repository does not establish production deployment or measured accuracy.
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)
@@ -12,8 +14,8 @@ A production-ready Retrieval-Augmented Generation system for querying PDF docume
 2. Documents are chunked and embedded using sentence-transformers (local, free)
 3. Embeddings stored in ChromaDB (local vector database)
 4. Ask questions in natural language → **hybrid retrieval** (BM25 + vector + cross-encoder reranking) → LLM generates answer with source citations
-5. Every query is **traced with Langfuse** (retrieval spans, generation spans, token usage, latency)
-6. Pipeline quality is **measured with RAGAS** (faithfulness, context precision/recall, answer relevancy)
+5. Optional **Langfuse tracing** records retrieval and generation spans when configured
+6. A **RAGAS evaluation harness** supports quality measurement; baseline results have not yet been published
 
 ## Stack
 
@@ -33,19 +35,19 @@ Pure vector search misses exact terms (proper nouns, error codes, numbers). The 
 - **BM25** keyword search (in-memory, synced with ChromaDB)
 - **Vector search** (ChromaDB cosine similarity)
 - **Reciprocal Rank Fusion (RRF)** to merge rankings without comparable score scales
-- **Cross-encoder reranking** (`cross-encoder/ms-marco-MiniLM-L-6-v2`) for final precision
+- **Cross-encoder reranking** (`cross-encoder/ms-marco-MiniLM-L-6-v2`) to reorder the final candidates
 
 Toggle with `HYBRID_SEARCH=true` and `RERANKER_ENABLED=true`.
 
 ### Observability (Langfuse)
-Every `/api/ask` call produces a trace with:
+When Langfuse is configured, `/api/ask` instrumentation records:
 - A **retrieval span** (query, chunks, scores, latency, mode)
 - A **generation span** (model, prompt, answer, token usage, latency)
 
 No-op when Langfuse keys are not set — the app runs identically without an observability backend.
 
 ### Evaluation (RAGAS)
-Answer the interview question *"how do you know your RAG works well?"* with numbers:
+Use the evaluation harness to measure a documented dataset and configuration. The presence of the harness alone is not evidence of answer quality:
 
 ```bash
 pip install -r requirements-dev.txt
@@ -53,7 +55,7 @@ pip install -r requirements-dev.txt
 python -m eval.run_eval --dataset eval/golden_dataset.json --k 5
 ```
 
-Metrics: **faithfulness** (anti-hallucination), **answer relevancy**, **context precision**, **context recall**.
+Metrics: **faithfulness**, **answer relevancy**, **context precision**, **context recall**.
 
 The golden dataset (`eval/golden_dataset.json`) is versioned JSON — run before/after any retrieval change and compare.
 
@@ -62,11 +64,11 @@ GitHub Actions runs `ruff check` + `pytest` on every push and PR (`.github/workf
 
 ## Roadmap
 
-The system is being scaled in phases, each designed to be demoable and measurable on its own.
+The following roadmap separates existing components from planned work. Published evaluation reports are still needed to establish quality and latency.
 
-### ✅ Phase 0 — Production retrieval core (done)
+### Phase 0 — Retrieval prototype components
 - Hybrid search (BM25 + vector + RRF fusion) with cross-encoder reranking
-- Langfuse tracing on every request (retrieval + generation spans)
+- Optional Langfuse tracing (retrieval + generation spans)
 - RAGAS evaluation harness with versioned golden dataset
 - CI: lint + tests on every push
 
@@ -86,7 +88,7 @@ The system is being scaled in phases, each designed to be demoable and measurabl
 - **Query analytics dashboard**: top questions, failure clusters, thumbs-down rate over time (Langfuse + Grafana).
 - **Cost/latency optimization**: semantic caching, embedding quantization, model routing per query complexity.
 
-Each phase ships behind feature flags and keeps the eval suite green — no regression merges.
+Before claiming a deployment milestone, publish a reproducible evaluation report and verify the relevant access controls and failure handling.
 
 ## Quick start
 
@@ -95,7 +97,7 @@ Each phase ships behind feature flags and keeps the eval suite green — no regr
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Configure LLM (optional — works with local embeddings alone)
+# 2. Configure LLM credentials for generated answers (embeddings run locally)
 cp .env.example .env
 # Edit .env with your OpenRouter API key
 
@@ -168,4 +170,4 @@ See `.env.example` for all configurable options.
 
 ## Author
 
-Ray Peratta — [GitHub](https://github.com/gozuray) — [LinkedIn](https://www.linkedin.com/in/prince-peratta)
+Ray Peratta — [GitHub](https://github.com/rayperatta) — [LinkedIn](https://www.linkedin.com/in/prince-peratta)
