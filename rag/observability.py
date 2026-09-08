@@ -61,6 +61,25 @@ class Tracer:
         finally:
             self._client.flush()
 
+    def score_feedback(self, trace_id: str, score: int, comment: str = "") -> None:
+        """Attach a user feedback score to an existing Langfuse trace.
+
+        No-op when tracing is disabled or the client call fails — feedback
+        is always persisted locally by ``FeedbackStore`` regardless.
+        """
+        if not self.enabled:
+            return
+        try:
+            self._client.score(
+                trace_id=trace_id,
+                name="user-feedback",
+                value=score,
+                comment=comment or None,
+            )
+            self._client.flush()
+        except Exception as exc:
+            logger.warning("Langfuse score failed (%s) — local copy kept", exc)
+
     def shutdown(self) -> None:
         """Flush pending events (call on app shutdown)."""
         if self.enabled:
@@ -126,6 +145,11 @@ class TraceHandle:
         if not self.enabled:
             return
         self._trace.update(output={"answer": answer, "llm": llm_used})
+
+    @property
+    def trace_id(self) -> Optional[str]:
+        """Langfuse trace id for this request (for feedback scoring)."""
+        return getattr(self._trace, "id", None) if self.enabled else None
 
 
 def _seconds_ago(ms: float):

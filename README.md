@@ -17,6 +17,19 @@ An independent Retrieval-Augmented Generation prototype for querying PDF documen
 5. Optional **Langfuse tracing** records retrieval and generation spans when configured
 6. A **RAGAS evaluation harness** supports quality measurement; baseline results have not yet been published
 
+## Architecture
+
+![RAG Document Q&A — pipeline infographic](docs/rag-infographic.png)
+
+The query flow in four phases — **intake → hybrid retrieval → augmentation → generation** — plus the async indexing side-lane and the quality loop:
+
+- **Retrieval**: hybrid search (BM25 + vector, fused with RRF) followed by cross-encoder reranking
+- **Generation**: reranked chunks are assembled into the prompt and answered by the configured LLM, with citations
+- **Indexing**: uploads return `202 + job_id`; a background worker (arq + Redis) chunks, embeds and persists to ChromaDB
+- **Observability**: every request is traced in Langfuse (spans, tokens, latency, user feedback); RAGAS evaluates against a versioned golden dataset
+
+An interactive, explorable version (dark/light themes, guided views, trace animation) lives in [`docs/rag-architecture.html`](docs/rag-architecture.html) — open it locally in a browser. The infographic source is [`docs/rag-infographic.html`](docs/rag-infographic.html).
+
 ## Stack
 
 - **FastAPI** — REST API + web UI
@@ -46,6 +59,12 @@ When Langfuse is configured, `/api/ask` instrumentation records:
 
 No-op when Langfuse keys are not set — the app runs identically without an observability backend.
 
+### Async ingestion (arq + Redis)
+With `REDIS_URL` set, `POST /api/upload` returns `202 + job_id` instantly and a background worker (`python -m arq worker.WorkerSettings`) chunks, embeds and registers the PDF — with automatic retries (`max_tries=3`), bounded concurrency (`max_jobs=4`) and backpressure from the Redis queue. Poll `GET /api/jobs/{job_id}` for status. Without `REDIS_URL` the app processes uploads synchronously, exactly as before: zero extra infrastructure needed to run locally.
+
+### Feedback loop
+Every `/api/ask` response includes a `trace_id`. Rate any answer with `POST /api/feedback` (score `+1`/`-1`, optional comment): feedback is stored locally (`data/feedback.jsonl`) as a tuning dataset and mirrored to Langfuse as a trace score. `GET /api/feedback/summary` returns totals and thumbs-down rate — the metric to watch after every retrieval/prompt change.
+
 ### Evaluation (RAGAS)
 Use the evaluation harness to measure a documented dataset and configuration. The presence of the harness alone is not evidence of answer quality:
 
@@ -73,10 +92,10 @@ The following roadmap separates existing components from planned work. Published
 - CI: lint + tests on every push
 
 ### 🚧 Phase 1 — Scale & reliability (in progress)
-- **Async ingestion**: Redis-backed task queue (arq) for PDF processing — job status endpoint, retries, backpressure. Upload returns `202 + job_id` instead of blocking.
-- **Feedback loop**: `POST /api/feedback` (👍/👎 per answer) stored in Langfuse → dataset for prompt/retrieval tuning.
-- **One-command stack**: `docker compose up` brings up app + Redis + Langfuse.
-- **Baseline metrics published**: RAGAS scores + p95 latency documented in this README.
+- **Async ingestion**: arq/Redis queue — upload returns `202 + job_id`, worker with retries/backpressure, `GET /api/jobs/{job_id}` status. *(done)*
+- **Feedback loop**: `POST /api/feedback` (👍/👎) persisted locally + Langfuse score mirroring; `/api/feedback/summary` aggregates. *(done)*
+- **One-command stack**: `docker compose up` brings up app + worker + Redis. *(done)*
+- **Baseline metrics published**: RAGAS scores + p95 latency documented in this README. *(pending)*
 
 ### Phase 2 — Multi-user & guardrails
 - **Collections / multi-tenancy**: namespaced document sets per user or project (ChromaDB collections) with per-collection queries.
@@ -113,17 +132,20 @@ uvicorn main:app --reload --port 8000
 docker compose up --build
 ```
 
-The API will be available at `http://localhost:8000`.
+Brings up **API + arq worker + Redis** — async ingestion works out of the box. The API will be available at `http://localhost:8000`.
 
 ## API endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/upload` | Upload PDF document(s) |
-| `POST` | `/api/ask` | Ask a question (returns answer + sources) |
+| `POST` | `/api/upload` | Upload PDF (sync result, or `202 + job_id` when async) |
+| `GET` | `/api/jobs/{job_id}` | Poll async ingestion job status |
+| `POST` | `/api/ask` | Ask a question (returns answer + sources + `trace_id`) |
+| `POST` | `/api/feedback` | Rate an answer 👍/👎 (score `+1`/`-1`) |
+| `GET` | `/api/feedback/summary` | Feedback aggregates (thumbs-down rate) |
 | `GET` | `/api/documents` | List uploaded documents |
 | `DELETE` | `/api/documents/{id}` | Delete a document |
-| `GET` | `/api/health` | Health check (includes hybrid + tracing status) |
+| `GET` | `/api/health` | Health check (hybrid, tracing, ingestion mode, feedback) |
 
 ## Architecture
 

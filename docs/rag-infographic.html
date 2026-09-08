@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f7f6f3;
+    padding: 38px 42px;
+    width: 1140px;
+  }
+  h1 {
+    font-size: 58px;
+    font-weight: 800;
+    text-align: center;
+    letter-spacing: -1.2px;
+    color: #111;
+    line-height: 1.15;
+    margin-bottom: 34px;
+  }
+  h1 .hl { background: #8ec5f0; padding: 0 16px; border-radius: 8px; }
+
+  .layout { display: flex; gap: 16px; }
+  .side-rail {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    text-align: center;
+    font-size: 30px;
+    font-weight: 800;
+    color: #111;
+    background: #efeaf9;
+    border-radius: 14px;
+    padding: 24px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+  }
+  .side-rail .robot { transform: rotate(90deg); font-size: 36px; }
+
+  .main { flex: 1; display: flex; flex-direction: column; position: relative; }
+
+  /* ---------- bands (two-tone) ---------- */
+  .band {
+    border-radius: 16px;
+    display: flex;
+    overflow: hidden;
+  }
+  .band .phase-label {
+    width: 175px;
+    flex-shrink: 0;
+    padding: 16px 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .band .phase-label h2 { font-size: 27px; font-weight: 800; color: #111; }
+  .band .phase-label p { font-size: 14px; font-weight: 600; color: #1c1c1c; margin-top: 3px; line-height: 1.3; }
+  .pill {
+    display: inline-block;
+    background: #fff;
+    border: 1.5px solid #d4d4d4;
+    border-radius: 7px;
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 2px 10px;
+    margin-top: 9px;
+    color: #333;
+    width: fit-content;
+  }
+  .band .content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 16px 18px;
+    flex-wrap: wrap;
+  }
+
+  .b-inject  { background: #efeaf9; } .b-inject  .phase-label { background: #e2d9f4; }
+  .b-p1 { background: #ddd2f3; }      .b-p1 .phase-label { background: #c9b8ec; }
+  .b-p2 { background: #d3e7f8; }      .b-p2 .phase-label { background: #b3d4f2; }
+  .b-p3 { background: #d6f0e2; }      .b-p3 .phase-label { background: #b3e3c9; }
+  .b-p4 { background: #fadfe8; }      .b-p4 .phase-label { background: #f4c3d5; }
+  .b-out { background: #efeaf9; }     .b-out  .phase-label { background: #e2d9f4; }
+
+  /* ---------- boxes ---------- */
+  .box {
+    background: #fff;
+    border: 2px solid #1a1a1a;
+    border-radius: 10px;
+    padding: 9px 13px;
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #111;
+    text-align: center;
+    box-shadow: 2.5px 2.5px 0 rgba(0,0,0,.14);
+  }
+  .box .ico { display: block; font-size: 21px; margin-bottom: 3px; }
+  .box small { display: block; font-size: 11px; font-weight: 500; color: #4a4a4a; margin-top: 2px; line-height: 1.25; }
+  .box.grow { flex: 1; }
+
+  /* ---------- dotted connectors with joints ---------- */
+  .conn {
+    width: 34px;
+    height: 0;
+    border-top: 3px dotted #3d3d3d;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .conn::before, .conn::after {
+    content: "";
+    position: absolute;
+    top: -5.5px;
+    width: 8px; height: 8px;
+    background: #3d3d3d;
+    border-radius: 50%;
+  }
+  .conn::before { left: -2px; }
+  .conn::after { right: -2px; }
+
+  .vconn {
+    width: 0;
+    height: 16px;
+    border-left: 3px dotted #8a8a8a;
+    margin: 3px auto;
+    position: relative;
+  }
+  .vconn::after {
+    content: "";
+    position: absolute;
+    left: -5.5px;
+    top: 4px;
+    width: 8px; height: 8px;
+    background: #8a8a8a;
+    border-radius: 50%;
+  }
+
+  /* ---------- diamond ---------- */
+  .diamond-wrap { width: 96px; height: 96px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .diamond {
+    width: 76px; height: 76px;
+    background: #fff;
+    border: 2px solid #1a1a1a;
+    transform: rotate(45deg);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 2.5px 2.5px 0 rgba(0,0,0,.14);
+  }
+  .diamond span {
+    transform: rotate(-45deg);
+    font-size: 10.5px;
+    font-weight: 700;
+    text-align: center;
+    line-height: 1.15;
+    color: #111;
+  }
+
+  /* ---------- augmentation stack ---------- */
+  .stack {
+    background: #fff;
+    border: 2px solid #1a1a1a;
+    border-radius: 12px;
+    padding: 10px 14px 12px;
+    flex: 1;
+    box-shadow: 2.5px 2.5px 0 rgba(0,0,0,.14);
+  }
+  .stack .title { text-align: center; font-size: 14.5px; font-weight: 700; margin-bottom: 8px; }
+  .stack .bar {
+    border-radius: 8px;
+    text-align: center;
+    font-size: 13.5px;
+    font-weight: 700;
+    padding: 7px 10px;
+    margin-bottom: 6px;
+    color: #111;
+    border: 1.5px solid rgba(0,0,0,.28);
+  }
+  .stack .bar:last-child { margin-bottom: 0; }
+  .bar.pink { background: #f3c6d8; }
+  .bar.blue { background: #bcd9f5; }
+  .bar.yellow { background: #fbe7b2; }
+
+  /* ---------- side dashed lanes ---------- */
+  .dashed-side {
+    border-left: 3px dashed #5c5c5c;
+    padding-left: 12px;
+    margin-left: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    justify-content: center;
+    position: relative;
+  }
+  .dashed-side::before, .dashed-side::after {
+    content: "";
+    position: absolute;
+    left: -6px;
+    width: 9px; height: 9px;
+    background: #5c5c5c;
+    border-radius: 50%;
+  }
+  .dashed-side::before { top: 0; }
+  .dashed-side::after { bottom: 0; }
+  .dashed-side .cap { font-size: 10.5px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: .6px; }
+
+  /* ---------- right feedback loop ---------- */
+  .loop {
+    position: absolute;
+    right: 6px;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    border-left: 3px dashed #7a7a7a;
+    z-index: 0;
+  }
+  .loop-label {
+    position: absolute;
+    right: -8px;
+    top: 50%;
+    transform: rotate(90deg) translateX(-50%);
+    transform-origin: right center;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #666;
+    letter-spacing: .4px;
+    white-space: nowrap;
+  }
+  .band { position: relative; z-index: 1; }
+
+  .footer {
+    text-align: center;
+    margin-top: 20px;
+    font-size: 13px;
+    color: #666;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<h1>Explaining <span class="hl">RAG Document Q&amp;A</span><br>to your Team</h1>
+
+<div class="layout">
+  <div class="side-rail">RAG Pipeline</div>
+
+  <div class="main">
+
+    <!-- Data injection -->
+    <div class="band b-inject">
+      <div class="phase-label"><h2>Data<br>injection</h2></div>
+      <div class="content">
+        <div class="box"><span class="ico">&#128172;</span>Chat UI<small>Type your query</small></div>
+        <div class="conn"></div>
+        <div class="box"><span class="ico">&#128100;</span>User</div>
+        <div class="box grow"><span class="ico">&#128196;</span>Documents<small>PDF &middot; POST /api/upload</small></div>
+      </div>
+    </div>
+
+    <div class="vconn"></div>
+
+    <!-- Phase 1 -->
+    <div class="band b-p1">
+      <div class="phase-label">
+        <h2>Phase 1</h2>
+        <p>Query intake &amp; orchestration</p>
+        <span class="pill">Intake</span>
+      </div>
+      <div class="content">
+        <div class="box"><span class="ico">&#9889;</span>FastAPI<small>POST /api/ask</small></div>
+        <div class="conn"></div>
+        <div class="box"><span class="ico">&#9989;</span>Validation<small>schema + limits</small></div>
+        <div class="conn"></div>
+        <div class="diamond-wrap"><div class="diamond"><span>Hybrid<br>search<br>ON?</span></div></div>
+        <div class="dashed-side">
+          <span class="cap">Async indexing</span>
+          <div class="box"><span class="ico">&#9881;&#65039;</span>Worker<small>arq + Redis &middot; 202 + job_id</small></div>
+          <div class="box"><span class="ico">&#129513;</span>Chunk + Embed<small>LangChain &middot; sentence-transformers</small></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="vconn"></div>
+
+    <!-- Phase 2 -->
+    <div class="band b-p2">
+      <div class="phase-label">
+        <h2>Phase 2</h2>
+        <p>Hybrid retrieval</p>
+        <span class="pill">Retrieve</span>
+      </div>
+      <div class="content">
+        <div class="box"><span class="ico">&#128269;</span>BM25 Search<small>keyword match &middot; exact terms</small></div>
+        <div class="box"><span class="ico">&#129516;</span>Vector Search<small>semantic similarity &middot; ChromaDB</small></div>
+        <div class="box"><span class="ico">&#128256;</span>RRF Fusion<small>merge both rankings</small></div>
+        <div class="box"><span class="ico">&#127919;</span>Rerank<small>cross-encoder MiniLM</small></div>
+      </div>
+    </div>
+
+    <div class="vconn"></div>
+
+    <!-- Phase 3 -->
+    <div class="band b-p3">
+      <div class="phase-label">
+        <h2>Phase 3</h2>
+        <p>Context augmentation</p>
+        <span class="pill">Augment</span>
+      </div>
+      <div class="content">
+        <div class="stack">
+          <div class="title">Retrieved Data Augmentation</div>
+          <div class="bar pink">Reranked chunks from ChromaDB</div>
+          <div class="bar blue">Add system prompt</div>
+          <div class="bar yellow">Augment user query</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="vconn"></div>
+
+    <!-- Phase 4 -->
+    <div class="band b-p4">
+      <div class="phase-label">
+        <h2>Phase 4</h2>
+        <p>Grounded generation</p>
+        <span class="pill">Generate</span>
+      </div>
+      <div class="content">
+        <div class="box"><span class="ico">&#129302;</span>LLM Generation<small>OpenRouter / OpenAI</small></div>
+        <div class="conn"></div>
+        <div class="box"><span class="ico">&#128196;</span>Answer + Citations<small>grounded in sources</small></div>
+        <div class="conn"></div>
+        <div class="box"><span class="ico">&#128077;</span>Feedback &plusmn;1<small>tuning dataset</small></div>
+        <div class="dashed-side">
+          <span class="cap">Quality loop</span>
+          <div class="box"><span class="ico">&#128202;</span>Langfuse<small>traces &middot; tokens &middot; latency</small></div>
+          <div class="box"><span class="ico">&#128200;</span>RAGAS<small>faithfulness &middot; golden dataset</small></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="vconn"></div>
+
+    <!-- Output -->
+    <div class="band b-out">
+      <div class="phase-label"><h2>Output</h2></div>
+      <div class="content">
+        <div class="box grow">Generated answer according to query (with source citations)</div>
+        <div class="box"><span class="ico">&#128202;</span>Trace + scores<small>Langfuse &middot; RAGAS report</small></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="footer">rag-document-qa &middot; FastAPI + LangChain + ChromaDB &middot; hybrid retrieval, traced &amp; evaluated</div>
+
+</body>
+</html>
