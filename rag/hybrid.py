@@ -9,7 +9,7 @@ query and chunk together (far more accurate than bi-encoder similarity).
 import logging
 import re
 import threading
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from .fusion import fuse_results
 

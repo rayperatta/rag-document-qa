@@ -7,12 +7,11 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 
 from rag.chunker import PDFChunker
 from rag.hybrid import HybridRetriever

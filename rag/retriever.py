@@ -3,7 +3,6 @@ import logging
 from typing import Dict, List, Optional
 
 import chromadb
-from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 
 logger = logging.getLogger(__name__)

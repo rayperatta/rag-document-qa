@@ -1,5 +1,4 @@
 """Tests for observability tracer — no-op behaviour without Langfuse config."""
-import os
 
 from rag.observability import TraceHandle, Tracer
 
